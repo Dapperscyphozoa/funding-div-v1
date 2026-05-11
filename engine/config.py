@@ -81,9 +81,10 @@ ACTIVE_UNIVERSE    = [c for c in (PRIMARY_UNIVERSE + SECONDARY_UNIVERSE)
 # ─── STRATEGY PARAMS ─────────────────────────────────────────────────
 # REQUIRED: forks override. Put your tuned numbers here verbatim.
 STRATEGY_PARAMS = {
-    "timeframe":       os.environ.get("STRATEGY_TIMEFRAME", "1h"),
-    "candles_history": int(os.environ.get("CANDLES_HISTORY", "200")),
-    # ... fork adds its own keys here
+    "timeframe":             os.environ.get("STRATEGY_TIMEFRAME", "1h"),
+    "candles_history":       int(os.environ.get("CANDLES_HISTORY", "200")),
+    "funding_threshold_hi":  float(os.environ.get("STRATEGY_FUNDING_THRESHOLD_HI", "0.000015")),
+    "funding_threshold_lo":  float(os.environ.get("STRATEGY_FUNDING_THRESHOLD_LO", "-0.000015")),
 }
 
 # ─── TRADE PARAMS ────────────────────────────────────────────────────
