@@ -83,10 +83,21 @@ ACTIVE_UNIVERSE    = [c for c in (PRIMARY_UNIVERSE + SECONDARY_UNIVERSE)
 STRATEGY_PARAMS = {
     "timeframe":       os.environ.get("STRATEGY_TIMEFRAME", "1h"),
     "candles_history": int(os.environ.get("CANDLES_HISTORY", "200")),
-    "funding_threshold_hi": float(os.environ.get("STRATEGY_FUNDING_THRESHOLD_HI", "0.000015")),
-    "funding_threshold_lo": float(os.environ.get("STRATEGY_FUNDING_THRESHOLD_LO", "-0.000015")),
-    "max_close_above_high_bars": int(os.environ.get("STRATEGY_MAX_CLOSE_HIGH_BARS", "8")),
+    # ... fork adds its own keys here
 }
+
+# Override any STRATEGY_PARAMS key via env (JSON dict): allows tuning forks
+# without code changes. Example:
+#   STRATEGY_PARAMS_OVERRIDES='{"mesh_min_anchors": 3, "approach_max_pct": 0.015}'
+import json as _json_cfg
+_overrides_raw = os.environ.get("STRATEGY_PARAMS_OVERRIDES", "").strip()
+if _overrides_raw:
+    try:
+        _overrides = _json_cfg.loads(_overrides_raw)
+        STRATEGY_PARAMS.update(_overrides)
+        print(f"[config] STRATEGY_PARAMS overrides applied: {list(_overrides.keys())}", flush=True)
+    except Exception as _e:
+        print(f"[config] STRATEGY_PARAMS_OVERRIDES parse failed: {_e}", flush=True)
 
 # ─── TRADE PARAMS ────────────────────────────────────────────────────
 TRADE_PARAMS = {
