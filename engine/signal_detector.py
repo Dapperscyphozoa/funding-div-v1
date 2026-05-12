@@ -72,9 +72,9 @@ def calc_atr(highs, lows, closes, period: int = 14) -> float:
     return float(tr.rolling(period).mean().iloc[-1])
 
 
-def evaluate_latest_bar(df: pd.DataFrame) -> Optional[dict]:
-    F_HI = STRATEGY_PARAMS.get("funding_threshold_hi", 0.0001)
-    F_LO = STRATEGY_PARAMS.get("funding_threshold_lo", -0.0001)
+def _evaluate_with_thresholds(df: pd.DataFrame, funding_threshold_hi: float, funding_threshold_lo: float) -> Optional[dict]:
+    F_HI = funding_threshold_hi
+    F_LO = funding_threshold_lo
     coin = df.attrs.get("coin", "")
     if not coin: return None
     if df is None or len(df) < 30: return None
@@ -121,3 +121,22 @@ def evaluate_latest_bar(df: pd.DataFrame) -> Optional[dict]:
         "fade_direction": "LONG" if is_long else "SHORT",
         "funding_rate": float(fund),
     }
+
+
+def evaluate_latest_bar(df) -> Optional[dict]:
+    """Tiered conviction scanner — strict (full size) + weak (quarter size)."""
+    strict_hi = STRATEGY_PARAMS.get("funding_threshold_hi", 0.0001)
+    strict_lo = STRATEGY_PARAMS.get("funding_threshold_lo", -0.0001)
+    sig = _evaluate_with_thresholds(df, strict_hi, strict_lo)
+    if sig is not None:
+        sig["conviction"] = "strong"; sig["size_multiplier"] = 1.0
+        sig["fire_reason"] = f"{sig.get('fire_reason','')}_STRONG"
+        return sig
+    weak_hi = STRATEGY_PARAMS.get("funding_threshold_hi_weak", 0.00005)
+    weak_lo = STRATEGY_PARAMS.get("funding_threshold_lo_weak", -0.00005)
+    sig = _evaluate_with_thresholds(df, weak_hi, weak_lo)
+    if sig is not None:
+        sig["conviction"] = "weak"; sig["size_multiplier"] = 0.25
+        sig["fire_reason"] = f"{sig.get('fire_reason','')}_WEAK"
+        return sig
+    return None
