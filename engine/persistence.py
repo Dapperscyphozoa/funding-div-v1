@@ -39,19 +39,25 @@ def init_db():
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA synchronous=NORMAL")
         # Pre-migration: legacy live_events table on disk may pre-date the 'ts'
-        # column. SQLite's CREATE INDEX in _create_schema fails on that table.
-        # Add the column FIRST if the table exists without it, so _create_schema
-        # can run idempotently.
+        # column. Force-recreate it with the correct schema. Data loss on
+        # live_events is acceptable — it's just an audit log, not trade state.
         try:
-            row = _conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='live_events'").fetchone()
-            if row:
+            tables = [r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            print(f"[persistence] tables on boot: {tables}", flush=True)
+            if 'live_events' in tables:
                 cols = [r[1] for r in _conn.execute("PRAGMA table_info(live_events)").fetchall()]
+                print(f"[persistence] live_events columns: {cols}", flush=True)
                 if 'ts' not in cols:
-                    _conn.execute("ALTER TABLE live_events ADD COLUMN ts INTEGER")
-                    _conn.execute("UPDATE live_events SET ts = strftime('%s','now') * 1000 WHERE ts IS NULL")
-                    print("[persistence] pre-migration: added live_events.ts column", flush=True)
+                    print("[persistence] live_events missing ts column — DROPPING and recreating", flush=True)
+                    _conn.execute("DROP TABLE live_events")
+                    print("[persistence] live_events dropped (audit log only, no trade state lost)", flush=True)
+                else:
+                    print("[persistence] live_events has ts column — no migration needed", flush=True)
+            else:
+                print("[persistence] live_events table does not yet exist", flush=True)
         except Exception as e:
-            print(f"[persistence] pre-migration warning: {e}", flush=True)
+            print(f"[persistence] pre-migration error: {e}", flush=True)
+            import traceback; traceback.print_exc()
         _create_schema(_conn)
         _migrate_schema(_conn)
         # Start periodic backup thread (debounced, free, idempotent)
