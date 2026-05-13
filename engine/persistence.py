@@ -38,6 +38,20 @@ def init_db():
         _conn = sqlite3.connect(_db_path(), check_same_thread=False, isolation_level=None)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA synchronous=NORMAL")
+        # Pre-migration: legacy live_events table on disk may pre-date the 'ts'
+        # column. SQLite's CREATE INDEX in _create_schema fails on that table.
+        # Add the column FIRST if the table exists without it, so _create_schema
+        # can run idempotently.
+        try:
+            row = _conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='live_events'").fetchone()
+            if row:
+                cols = [r[1] for r in _conn.execute("PRAGMA table_info(live_events)").fetchall()]
+                if 'ts' not in cols:
+                    _conn.execute("ALTER TABLE live_events ADD COLUMN ts INTEGER")
+                    _conn.execute("UPDATE live_events SET ts = strftime('%s','now') * 1000 WHERE ts IS NULL")
+                    print("[persistence] pre-migration: added live_events.ts column", flush=True)
+        except Exception as e:
+            print(f"[persistence] pre-migration warning: {e}", flush=True)
         _create_schema(_conn)
         _migrate_schema(_conn)
         # Start periodic backup thread (debounced, free, idempotent)
