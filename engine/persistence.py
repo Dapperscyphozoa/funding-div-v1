@@ -41,20 +41,29 @@ def init_db():
         # Pre-migration: legacy live_events table on disk may pre-date the 'ts'
         # column. Force-recreate it with the correct schema. Data loss on
         # live_events is acceptable — it's just an audit log, not trade state.
+        # Pre-migration v3: legacy disk schema may have any table without ts.
+        # Drop any table that's referenced by CREATE INDEX ... (ts) in the
+        # expected schema but lacks a ts column. Drop is safe — data already
+        # wiped, only schema reset needed.
         try:
             tables = [r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             print(f"[persistence] tables on boot: {tables}", flush=True)
-            if 'live_events' in tables:
-                cols = [r[1] for r in _conn.execute("PRAGMA table_info(live_events)").fetchall()]
-                print(f"[persistence] live_events columns: {cols}", flush=True)
-                if 'ts' not in cols:
-                    print("[persistence] live_events missing ts column — DROPPING and recreating", flush=True)
-                    _conn.execute("DROP TABLE live_events")
-                    print("[persistence] live_events dropped (audit log only, no trade state lost)", flush=True)
-                else:
-                    print("[persistence] live_events has ts column — no migration needed", flush=True)
-            else:
-                print("[persistence] live_events table does not yet exist", flush=True)
+            for t in ('signals', 'live_events'):
+                if t in tables:
+                    cols = [r[1] for r in _conn.execute(f"PRAGMA table_info({t})").fetchall()]
+                    print(f"[persistence] {t} columns: {cols}", flush=True)
+                    if 'ts' not in cols:
+                        print(f"[persistence] {t} missing ts → DROP", flush=True)
+                        _conn.execute(f"DROP TABLE {t}")
+            # Drop any index in stale state (won't be re-created if pointing at missing col)
+            indexes = [r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()]
+            for idx in indexes:
+                if not idx.startswith('sqlite_'):
+                    try:
+                        _conn.execute(f"DROP INDEX IF EXISTS {idx}")
+                    except Exception:
+                        pass
+            print(f"[persistence] dropped {len(indexes)} stale indexes", flush=True)
         except Exception as e:
             print(f"[persistence] pre-migration error: {e}", flush=True)
             import traceback; traceback.print_exc()
