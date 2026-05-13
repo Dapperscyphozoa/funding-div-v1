@@ -41,29 +41,36 @@ def init_db():
         # Pre-migration: legacy live_events table on disk may pre-date the 'ts'
         # column. Force-recreate it with the correct schema. Data loss on
         # live_events is acceptable — it's just an audit log, not trade state.
-        # Pre-migration v3: legacy disk schema may have any table without ts.
-        # Drop any table that's referenced by CREATE INDEX ... (ts) in the
-        # expected schema but lacks a ts column. Drop is safe — data already
-        # wiped, only schema reset needed.
+        # Pre-migration v4: legacy disk schema. Drop any table missing
+        # expected columns. Data already wiped — schema reset only.
+        EXPECTED_SCHEMA = {
+            "signals": {"id","ts","coin","ref_price","atr"},
+            "trades": {"cloid","ts_open","coin","side","size","entry_px","sl_px","tp_px","notional","leverage","max_hold_bars","mode","status"},
+            "closures": {"cloid","ts_close","exit_px","outcome","gross_pnl","net_pnl","bps_return","bars_held"},
+            "live_events": {"id","ts","event_type"},
+        }
         try:
             tables = [r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             print(f"[persistence] tables on boot: {tables}", flush=True)
-            for t in ('signals', 'live_events'):
-                if t in tables:
-                    cols = [r[1] for r in _conn.execute(f"PRAGMA table_info({t})").fetchall()]
-                    print(f"[persistence] {t} columns: {cols}", flush=True)
-                    if 'ts' not in cols:
-                        print(f"[persistence] {t} missing ts → DROP", flush=True)
-                        _conn.execute(f"DROP TABLE {t}")
-            # Drop any index in stale state (won't be re-created if pointing at missing col)
+            dropped = []
+            for table_name, expected_cols in EXPECTED_SCHEMA.items():
+                if table_name not in tables:
+                    continue
+                actual_cols = {r[1] for r in _conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+                missing = expected_cols - actual_cols
+                if missing:
+                    print(f"[persistence] {table_name} missing columns {missing} → DROP", flush=True)
+                    _conn.execute(f"DROP TABLE {table_name}")
+                    dropped.append(table_name)
+                else:
+                    print(f"[persistence] {table_name} schema OK", flush=True)
+            # Drop all non-system indexes — they get rebuilt by _create_schema
             indexes = [r[0] for r in _conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()]
-            for idx in indexes:
-                if not idx.startswith('sqlite_'):
-                    try:
-                        _conn.execute(f"DROP INDEX IF EXISTS {idx}")
-                    except Exception:
-                        pass
-            print(f"[persistence] dropped {len(indexes)} stale indexes", flush=True)
+            stale_idx = [i for i in indexes if not i.startswith('sqlite_')]
+            for idx in stale_idx:
+                try: _conn.execute(f"DROP INDEX IF EXISTS {idx}")
+                except Exception: pass
+            print(f"[persistence] dropped {len(dropped)} tables, {len(stale_idx)} indexes", flush=True)
         except Exception as e:
             print(f"[persistence] pre-migration error: {e}", flush=True)
             import traceback; traceback.print_exc()
